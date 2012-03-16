@@ -1,0 +1,605 @@
+#!/bin/bash
+# Script Name: mplayerstart    http://igurublog.wordpress.com/downloads/script-mplayerstart/
+# Requires: mplayer zenity
+# License: GNU GENERAL PUBLIC LICENSE Version 3 http://www.gnu.org/licenses/gpl-3.0.txt
+
+
+# === User Options ================================================================
+
+# Location of resume files and temp files; approx 100MB free space required
+data=""
+
+# Optional: Parent folder(s) of your audio & video files for
+#           searching for moved resumes
+#           If you pass a .resume file to mplayerstart which contains
+#           an invalid location for the media file (perhaps you moved it),
+#           mplayerstart will recursively search these folders for the file
+search1=""
+search2=""
+
+# Default mplayer video options
+moptions="-vo xv -idx -fs -alang en"
+
+# Audio Playback Options
+guiplayer="gmplayer"
+
+# TV Mode Options
+# use this for a single xinerama desktop (typical dual-head setup in KDE4):
+tvoption="-xineramascreen 2"
+# OR use this for a separate X display:
+#tvoption="-display :1"
+
+# xinit
+# set xinitlayout to xorg.conf's Serverlayout identifier for TV if you want
+#   mplayerstart to xinit a new X display for tv mode
+#   see http://en.wikibooks.org/wiki/NVidia/TV-OUT
+#   does not work with tvmode=auto; no resume file will be saved
+#   press 'q' to quit or Ctrl-Alt-F7 to return to monitor
+#xinitlayout="tv"
+# X display to start (only works if xinitlayout is also set):		
+xinitdisplay=":1"
+
+# Volume Restoration Options - see 'amixer' output to adjust if needed
+# requires amixer (alsa-lib)
+# primary amixer control and channel
+master="Master"							
+masterchannel="Mono: Playback"
+# secondary amixer control and channel
+pcm="PCM"
+pcmchannel="Front Right: Playback"
+
+# Pop-up Options
+# Requires zenity, Xdialog, or kdialog
+# set to "Z" for Zenity, "X" for Xdialog, "K" for kdialog, or "" for no pop-ups
+dialogtype="Z"
+# specify optional custom GTK rc files for Zenity or Xdialog pop-up themes
+# green provides info, red provides error message
+greenrcfile=""
+redrcfile=""
+
+
+# === End User Options ==========================================================
+
+help () {
+	if [ "$xinitlayout" != "" ]; then
+		tvx="xinit layout \"$xinitlayout\" on $xinitdisplay"
+	else
+		tvx="$tvoption"
+	fi
+	cat << EOF
+mplayerstart version 1.4.1
+Creates resume file for resumable playback; disables X, KDE, and Gnome
+screensavers; restores last volume levels; starts mplayer in full-screen
+mode; sends output to selected display.
+Usage: mplayerstart [OPTIONS] ~/video/movie1.avi
+       mplayerstart [OPTIONS] ~/.mplayerstart/movie1.avi.resume
+       mplayerstart --resumelast
+       mplayerstart --resumepre
+       mplayerstart --rewind
+       mplayerstart --tvmode MODE
+Options:
+--tv                sends output to TV Display
+                      ignored when playing audio; overrides tvmode setting
+--tvmode off        sets TV-out mode off for future videos
+                      also cancels '--tvmode once'
+--tvmode on         sets TV-out mode on for future videos
+--tvmode auto       sets TV-out mode to auto-detect for future videos
+                      video will play on current display
+                      only works with separate X screens, not xinerama
+--tvmode once       prepares to play only the next video on TV-out
+                      overrides prior tvmode for next play only
+--resume            resumes playing file from last stop point
+--resumelast        resumes playing last played media file
+--resumepre         resumes playing previous-to-last played media file
+--rewind            deletes last played resume file
+--mopt "OPTIONS"    passes additional playback OPTIONS to mplayer
+Note: Resume files are auto-deleted after 60 days.
+Current data folder for resume files: $data
+Current TV option: $tvx
+Default Mplayer options: $moptions
+
+Instructions and updates:
+http://igurublog.wordpress.com/downloads/script-mplayerstart/
+
+EOF
+	exit
+}
+
+saveroff () {
+	# disable screensavers
+	kde3=`ps -A | grep " kdesktop"`
+	if [ "$kde3" != "" ]; then
+		test=`dcop kdesktop KScreensaverIface isEnabled`
+		if [ "$test" = "true" ]; then
+			dcop kdesktop KScreensaverIface enable false > /dev/null 2> /dev/null
+			kde3saver=1
+		fi
+	fi
+	simsaver="$data/.mplayer-suspend"
+	if [ ! -e "$simsaver" ]; then
+		cat << EOF > "$simsaver"
+#!/bin/bash
+# mplayerstart - keep the screensaver from coming on
+while (( 1 == 1 )); do
+	# KDE4
+	qdbus org.kde.krunner /ScreenSaver SimulateUserActivity > /dev/null 2> /dev/null
+	# Gnome screensaver
+	gnome-screensaver-command --poke > /dev/null 2> /dev/null
+	# Xscreensaver
+	xscreensaver-command -display :0 --deactivate > /dev/null 2> /dev/null
+	xscreensaver-command -display :1 --deactivate > /dev/null 2> /dev/null
+	xscreensaver-command -display :0.0 --deactivate > /dev/null 2> /dev/null
+	xscreensaver-command -display :0.1 --deactivate > /dev/null 2> /dev/null
+	xscreensaver-command -display :1.0 --deactivate > /dev/null 2> /dev/null
+	xscreensaver-command -display :1.1 --deactivate > /dev/null 2> /dev/null
+	sleep 59
+done
+EOF
+	fi
+	chmod ugo+x,go-w "$simsaver" > /dev/null 2> /dev/null
+	"$simsaver" &
+	saverpid=$!
+}
+
+saveron () {
+	# re-enable screensavers
+	if (( kde3saver == 1 )); then
+		dcop kdesktop KScreensaverIface enable true > /dev/null 2> /dev/null
+		kde3saver=0
+	fi
+	if [ "$saverpid" != "" ]; then
+		kill $saverpid > /dev/null 2> /dev/null
+	fi
+}
+
+dialog () {    #$1="text"  $2="red"OR"green"
+	if [ "$2" = "red" ]; then
+		rcfile="$redrcfile"
+	else
+		rcfile="$greenrcfile"
+	fi
+	case "$dialogtype" in
+		"Z" )
+			if [ "$rcfile" = "" ]; then
+				DISPLAY=$dsp zenity --info --title="Mplayerstart" --text="$1" --timeout=1
+			else
+				DISPLAY=$dsp GTK2_RC_FILES="$rcfile" zenity --info --title="Mplayerstart" --text="$1" --timeout=1
+			fi
+			;;
+		"X" )
+			if [ "$rcfile" = "" ]; then
+				DISPLAY=$dsp Xdialog --no-buttons --title "Mplayerstart" --infobox "$1" 10 50 500 2> /dev/null
+			else
+				DISPLAY=$dsp Xdialog --no-buttons --title "Mplayerstart" --rc-file "$rcfile" --infobox "$1" 10 50 500 2> /dev/null
+			fi
+			;;
+		"K" )
+			kdialog --title "Mplayerstart" --passivepopup "$1" 2
+			;;
+	esac
+}
+
+# init
+dsp="$DISPLAY"
+curuser=`whoami`
+if [ "$data" == "" ]; then
+	data="/home/$curuser/.mplayerstart"
+fi
+mkdir -p "$data/"
+curdir=`pwd`
+
+filename=""
+restime=0
+outfile=""
+resume=0
+resumeplay=""
+tv=0
+seektime=""
+rx=0
+mopt=""
+
+# parse command line
+index=0
+while [ "$1" != "" ];
+do
+	if [ "${1:0:1}" = "-" ]; then
+		case "$1" in
+			--help | -help )
+				help
+				;;
+			--tv )
+				tv=1
+				;;
+			--tvmode )
+				if [ "$2" = "" ] || [ "${2:0:1}" = "-" ]; then
+					echo Option $1 requires an argument
+					exit 1
+				fi
+				tvmode="$2"
+				shift
+				;;
+			--resume )
+				resume=1
+				;;
+			--resumepre )
+				resumepre=1
+				;;
+			--resumelast )
+				resumelast=1
+				;;
+			--rewind )
+				rewind=1
+				;;
+			--mopt )
+				if [ "$mopt" != "" ]; then
+					echo "Only one --mopt is permitted"
+					exit 1
+				fi
+				if [ "$2" = "" ]; then
+					echo Option $1 requires an argument
+					exit 1
+				fi
+				mopt="$2"
+				shift
+				;;
+			* )
+				echo Unknown option $1
+				exit 1
+				;;
+		esac
+	else
+		let "index+=1"
+		case $index in
+			1 )
+				nowplaying="$1"
+				;;
+			* )
+				echo Too many arguments
+				exit 1
+				;;
+		esac
+	fi
+	shift
+done
+
+if (( resumepre + resumelast + rewind == 0 )) && [ "$tvmode" = "" ] && [ "$nowplaying" = "" ]; then
+	help
+fi
+
+# pop-up?
+if [ "$dialogtype" != "" ]; then
+	if [ "$dialogtype" != "Z" ] && [ "$dialogtype" != "X" ] && [ "$dialogtype" != "K" ]; then
+		echo "mplayerstart: Warning: Unknown dialog type \'$dialogtype\' ignored"
+		dialogtype=""
+	fi
+fi
+# create rc files
+if [ "$dialogtype" = "Z" ] || [ "$dialogtype" = "X" ]; then 
+	if [ "$greenrcfile" != "" ]; then
+		if [ ! -e "$greenrcfile" ]; then
+			greenrcfile=""
+		fi
+	fi
+	if [ "$redrcfile" != "" ]; then
+		if [ ! -e "$redrcfile" ]; then
+			redrcfile=""
+		fi
+	fi
+	if [ "$greenrcfile" = "" ]; then
+		greenrcfile="$data/.mplayerstart-greenrc"
+		if [ ! -e "$greenrcfile" ]; then
+			cat << EOF > "$greenrcfile"
+style 'green_background' {
+			bg[NORMAL] = {0.00, 0.8, 0.00}
+			fg[NORMAL] = { 1.0, 1.0, 1.0 }
+			font_name = "DejaVu Sans 16"
+}
+widget '*' style 'green_background'
+EOF
+		fi
+	fi
+	if [ "$redrcfile" = "" ]; then
+		redrcfile="$data/.mplayerstart-redrc"
+		if [ ! -e "$redrcfile" ]; then
+			cat << EOF > "$redrcfile"
+style 'red_background' {
+			bg[NORMAL] = {.7, 0.00, 0.00}
+			fg[NORMAL] = { 1.0, 1.0, 1.0 }
+			font_name = "DejaVu Sans 16"
+}
+widget '*' style 'red_background'
+EOF
+		fi
+	fi
+fi
+
+# save volume
+test=`amixer | grep "command not found"`
+if [ "$test" != "" ] || [ "$master" = "" ] || [ "$pcm" = "" ]; then
+	novol=1
+else
+	mastervol=`amixer sget "$master",0`
+	mastervol=${mastervol##*$masterchannel }
+	mastervol=${mastervol%% [*}
+	pcmvol=`amixer sget "$pcm",0`
+	pcmvol=${pcmvol##*$pcmchannel }
+	pcmvol=${pcmvol%% [*}
+fi
+
+# set tvmode
+if [ "$tvmode" != "" ]; then
+	case "$tvmode" in
+	"once" | "ONCE" )
+		touch "$data/.tv-once"
+		tvmode="ONCE"
+		;;
+	"auto" | "AUTO" )
+		rm -f "$data/.tv-mode"
+		rm -f "$data/.tv-once"
+		touch "$data/.tv-auto"
+		tvmode="AUTO"
+		;;
+	"1" | "on" | "ON" )
+		rm -f "$data/.tv-auto"
+		rm -f "$data/.tv-once"
+		touch "$data/.tv-mode"
+		tvmode="ON"
+		;;
+	* ) 
+		rm -f "$data/.tv-mode"
+		rm -f "$data/.tv-once"
+		rm -f "$data/.tv-auto"
+		tvmode="OFF"
+		;;
+	esac
+	echo "TV Mode: $tvmode"
+	dialog "TV Mode $tvmode"
+else
+	tvmode="OFF"
+fi
+
+# resumes
+if (( resumepre + resumelast + rewind != 0 )); then
+	# Find most recently modified resume file
+	cd "$data"
+	lastresume=`ls -1t *.resume 2> /dev/null | head -n 1`
+	cd "$curdir"
+	if [ "$lastresume" = "" ]; then
+		echo "No resume files found"
+		dialog  "No resume files found" "red"
+		exit 2
+	fi
+	if (( resumepre == 1 )); then
+		touch --date="2000-01-01 00:00" "$data/$lastresume"
+		cd "$data"
+		lastresume=`ls -1t *.resume 2> /dev/null | head -n 1`
+		cd "$curdir"
+	fi
+	if (( rewind == 1 )); then
+		rm "$data/$lastresume"
+		dialog "Rewind"
+		lastresume=""
+	fi
+	if (( resumelast + resumepre != 0 )) && [ "$lastresume" != "" ]; then
+		nowplaying="$data/$lastresume"
+		resume=1
+	fi
+fi
+
+# file to play?
+if [ "$nowplaying" = "" ]; then
+	exit
+elif [ ! -e "$nowplaying" ]; then
+	echo 'File not found: '"$nowplaying"
+	dialog "File not found" "red"
+	exit 2
+fi
+# resume file was passed on the command line?
+if [ "${nowplaying##*.}" = "resume" ]; then
+	resume=1
+fi
+
+# get resume info
+if (( resume == 1 )); then
+	# locate resume file
+	if [ "${nowplaying##*.}" = "resume" ]; then
+		# resume file was passed on the command line
+		resumefile="$nowplaying"
+	else
+		resumefile="$data/`basename "$nowplaying"`.resume"
+	fi
+	# read resume file if present
+	if [ -e "$resumefile" ]; then
+		lcount=0
+		seektime=""
+		# Set the field seperator to a newline
+		IFS="
+		"
+		for line in `cat "$resumefile"`;do
+			case $lcount in
+			0 ) seektime="$line";;
+			1 ) resumeplay="$line";;
+			2 ) mastervol="$line";;
+			3 ) pcmvol="$line";;
+			esac
+			(( lcount +=1 ))
+		done
+		IFS=" "
+		if [ "$seektime" != "" ]; then
+			if [ "${nowplaying##*.}" = "resume" ]; then
+				if [ "$resumeplay" = "" ]; then
+					# accomodate prior versions of mplayerstart
+					nowplaying=`basename "$nowplaying" ".resume"`
+				else
+					nowplaying="$resumeplay"
+				fi
+				if [ "$resumeplay" = "" ] || [ ! -e "$nowplaying" ]; then
+					# find resumed file
+					cleanname=`basename "$nowplaying"`
+					# replace troublesome characters
+					cleanname=${cleanname//"["/"\["}
+					cleanname=${cleanname//"]"/"\]"}
+					cleanname=${cleanname//"^"/"\^"}
+					cleanname=${cleanname//"?"/"\?"}
+					cleanname=${cleanname//"*"/"\*"}
+					cleanname=${cleanname//"&"/"\&"}
+					# search
+					if [ "$search1" != "" ]; then
+						if [ "$search2" == "" ]; then
+							nowplaying=`find -H "$search1" -type f -name "$cleanname"`
+						else
+							nowplaying=`find -H "$search1" "$search2" -type f -name "$cleanname"`
+						fi
+						# extract the first file listed
+						nowplaying=${nowplaying%%$'\n'*}
+					else
+						nowplaying=""
+					fi
+				fi
+				if [ "$nowplaying" = "" ] || [ ! -e "$nowplaying" ]; then
+					echo 'File not found'
+					dialog "File not found" "red"
+					exit 2
+				fi
+			fi
+			echo "Resuming at $seektime seconds"
+			seektime="-ss $seektime"
+			# Resume volume levels
+			if (( novol != 1 )); then
+				amixer set "$master",0 $mastervol > /dev/null
+				amixer set "$pcm",0 $pcmvol > /dev/null
+			fi
+		fi
+	fi
+fi
+
+# set output filename
+if [ ! -e "$data/resume-lock" ]; then
+	filename=`basename "$nowplaying"`
+	rand=`uuidgen -r`
+	rand=${rand:24}
+	outfile="$data/$filename.$rand.log"
+fi
+
+# cleanup
+# delete output files older than 6 days
+find -L $data -maxdepth 0 -type f -mtime +6 -name "*.log" -execdir rm {} \;
+# delete resume files older than 60 days
+find -L $data -maxdepth 0 -type f -mtime +60 -name "*.resume" -execdir rm {} \;
+
+# Get file extension all uppercase
+filetype=`echo "${nowplaying##*.}" | tr a-z A-Z`
+
+# Audio or video?
+if [ "$filetype" = "MP3" ] || [ "$filetype" = "WMA" ] || [ "$filetype" = "FLAC" ] || \
+[ "$filetype" = "WAV" ] || [ "$filetype" = "OGG" ] || [ "$filetype" = "M4A" ] || \
+[ "$filetype" = "AC3" ] || [ "$filetype" = "AAC" ] || [ "$filetype" = "RM" ] || \
+[ "$filetype" = "RAM" ]; then
+	# play audio file
+	video=0
+	if [ "$outfile" = "" ]; then
+		$guiplayer $seektime "$nowplaying"
+	else
+		$guiplayer $seektime "$nowplaying" > "$outfile"
+	fi
+else
+	# play video file
+	video=1
+	#disable screensaver
+	saveroff
+	# tv mode
+	mp="mplayer"
+	mp2=""
+	if (( tv == 0 )); then
+		if [ -e "$data/.tv-once" ]; then
+			tv=1
+			rm "$data/.tv-once"
+		elif [ -e "$data/.tv-mode" ]; then
+			tv=1
+		elif [ -e "$data/.tv-auto" ]; then
+			tv=1
+			tvauto=1
+			tvoption="-display $DISPLAY"
+		fi
+	else
+		rm -f "$data/.tv-once"
+	fi
+	if (( tv == 0 )); then
+		tvdsp=""
+	else
+		if [ "$xinitlayout" != "" ] && [ "$xinitdisplay" != "" ] && (( tvauto != 1 )); then
+			mp="exec /usr/bin/xinit /usr/bin/xterm -ut -e /usr/bin/mplayer"
+			mp2="-- /usr/bin/X $xinitdisplay -layout $xinitlayout"
+			tvdsp=""
+			outfile=""
+		else
+			tvdsp="$tvoption"
+		fi
+	fi
+	if [ "$outfile" = "" ]; then
+		echo ">>> $mp $moptions $mopt $tvdsp $seektime \"$nowplaying\" $mp2"
+		eval $mp $moptions $mopt $tvdsp $seektime \"$nowplaying\" $mp2
+	else
+		echo ">>> $mp $moptions $mopt $tvdsp $seektime \"$nowplaying\" $mp2 > \"$outfile\""
+		eval $mp $moptions $mopt $tvdsp $seektime \"$nowplaying\" $mp2 > "$outfile"
+	fi
+fi
+
+# process outfile - determine resume time
+if [ "$outfile" != "" ] && [ -e "$outfile" ]; then
+	mout=`tail --bytes=350 "$outfile"`
+	if (( video == 1 )); then
+		# did mplayer reach end of file?
+		endoffile=${mout##*End of file)}	
+		if [ "$endoffile" != "" ]; then
+			restime=${mout##* V:}
+			restime=${restime%% A-V:*}
+			restime=${restime%%.*}
+		fi
+	else
+		# calculate remaining audio seconds
+		atime=${mout##*A:}
+		atime=${atime%%.*}
+		btime=${mout##*of}
+		btime=${btime%%.*}
+		(( remain = btime - atime ))
+		if (( remain > 15 )); then
+			restime=$atime
+		fi
+	fi
+	rm -f "$outfile"
+fi
+
+# save resume file
+(( rx = restime - 5 ))
+if (( rx > 10 )); then
+	echo "$rx" > "$data/$filename.resume"
+	echo "$nowplaying" >> "$data/$filename.resume"
+	if (( novol != 1 )); then
+		mastervol=`amixer sget "$master",0`
+		mastervol=${mastervol##*$masterchannel }
+		mastervol=${mastervol%% [*}
+		pcmvol=`amixer sget "$pcm",0`
+		pcmvol=${pcmvol##*$pcmchannel }
+		pcmvol=${pcmvol%% [*}
+	else
+		mastervol=20
+		pcmvol=20
+	fi
+	echo $mastervol >> "$data/$filename.resume"
+	echo $pcmvol >> "$data/$filename.resume"
+	echo "Resume file created: $rx seconds"
+else
+	rm -f "$data/$filename.resume"
+fi
+
+# cancel saver-suspend
+if (( video == 1 )); then
+	saveron
+fi
+
+exit
+
+# Changelog
+# 1.4.1: Changed default pop-up dialog to Zenity
+

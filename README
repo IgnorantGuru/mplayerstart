@@ -1,0 +1,48 @@
+README for mplayerstart
+
+
+OVERVIEW
+    
+mplayerstart is a wrapper script for mplayer - it adds the ability to
+resume video and audio playback from a saved position, send video output
+to another display, disable the screensaver during playback (X, KDE3, KDE4,
+and Gnome screensavers), and restore volume levels when resuming.
+
+Homepage & Instructions:
+    http://igurublog.wordpress.com/downloads/script-mplayerstart/
+
+Downloads:
+    https://github.com/IgnorantGuru/mplayerstart
+    https://github.com/IgnorantGuru/mplayerstart/tree/master/packages
+
+Debian/Ubuntu PPA:
+    http://igurublog.wordpress.com/downloads/ppa/
+    
+
+INSTALLATION
+
+To install:
+
+    wget https://github.com/IgnorantGuru/mplayerstart/raw/master/mplayerstart
+    sudo install mplayerstart /usr/local/bin/mplayerstart
+
+To remove:
+    
+    sudo rm /usr/local/bin/mplayerstart
+
+
+LICENSE
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
