@@ -2,7 +2,8 @@ README for mplayerstart
 
 
 OVERVIEW
-    
+========
+
 mplayerstart is a wrapper script for mplayer - it adds the ability to
 resume video and audio playback from a saved position, send video output
 to another display, disable the screensaver during playback (X, KDE3, KDE4,
@@ -12,19 +13,26 @@ Homepage & Instructions:
     http://igurublog.wordpress.com/downloads/script-mplayerstart/
 
 Downloads:
-    https://github.com/IgnorantGuru/mplayerstart
+    https://github.com/IgnorantGuru/mplayerstart/tags
     https://github.com/IgnorantGuru/mplayerstart/tree/master/packages
 
 Debian/Ubuntu PPA:
     http://igurublog.wordpress.com/downloads/ppa/
-    
+
+Bug Reports:
+    https://github.com/IgnorantGuru/mplayerstart/issues
+
 
 INSTALLATION
+============
 
 To install:
 
     wget https://github.com/IgnorantGuru/mplayerstart/raw/master/mplayerstart
     sudo install mplayerstart /usr/local/bin/mplayerstart
+
+mplayerstart also REQUIRES: mplayer zenity
+mplayerstart recommends:    alsa-lib xdialog kdialog
 
 To remove:
     
@@ -32,6 +40,7 @@ To remove:
 
 
 LICENSE
+=======
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
