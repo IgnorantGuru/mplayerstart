@@ -67,7 +67,7 @@ help () {
 		tvx="$tvoption"
 	fi
 	cat << EOF
-mplayerstart version 1.4.1
+mplayerstart version 1.4.2
 Creates resume file for resumable playback; disables X, KDE, and Gnome
 screensavers; restores last volume levels; starts mplayer in full-screen
 mode; sends output to selected display.
@@ -537,11 +537,11 @@ else
 		fi
 	fi
 	if [ "$outfile" = "" ]; then
-		echo ">>> $mp $moptions $mopt $tvdsp $seektime \"$nowplaying\" $mp2"
-		eval $mp $moptions $mopt $tvdsp $seektime \"$nowplaying\" $mp2
+		echo ">>> $mp $seektime $tvdsp $moptions $mopt \"$nowplaying\" $mp2"
+		eval $mp $seektime $tvdsp $moptions $mopt \"$nowplaying\" $mp2
 	else
-		echo ">>> $mp $moptions $mopt $tvdsp $seektime \"$nowplaying\" $mp2 > \"$outfile\""
-		eval $mp $moptions $mopt $tvdsp $seektime \"$nowplaying\" $mp2 > "$outfile"
+		echo ">>> $mp $seektime $tvdsp $moptions $mopt \"$nowplaying\" $mp2 > \"$outfile\""
+		eval $mp $seektime $tvdsp $moptions $mopt \"$nowplaying\" $mp2 > "$outfile"
 	fi
 fi
 
@@ -601,5 +601,6 @@ fi
 exit
 
 # Changelog
+# 1.4.2: mopt after seektime to correct resume issue #2
 # 1.4.1: Changed default pop-up dialog to Zenity
 
