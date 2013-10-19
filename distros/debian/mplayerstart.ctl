@@ -10,3 +10,4 @@ Changelog: changelog
 Readme: README
 Depends: mplayer, zenity
 Suggests: alsa-utils
+Files: mplayerstart /usr/bin/
